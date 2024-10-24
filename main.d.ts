@@ -47,3 +47,54 @@ interface PlannerOverride {
   dismissed: boolean;
   assignment_id: number;
 }
+
+interface Properties {
+  ID: {
+    rich_text: string; //TODO: type better
+  };
+  "Blocked Date": {
+    date: { start: string; end: string | null; time_zone: string | null };
+  };
+  Class: {
+    id: string;
+    type: "rich_text";
+    rich_text: string; //TODO: type better
+  };
+  Priority: {
+    status: string; //TODO: type better
+  };
+  Link: {
+    url: string;
+  };
+  Name: {
+    id: string;
+    type: "title";
+    title: string; //TODO: type better
+  };
+  Due: {
+    id: string;
+    type: "date";
+    date: { start: string; end: string | null; time_zone: string | null };
+  };
+  Status: {
+    id: string;
+    type: "status";
+    status: string; //TODO: type better
+  };
+  Estimate: {
+    id: string;
+    type: "select";
+    select: string; //TODO: type better
+  };
+}
+
+interface Page {
+  object: "page";
+  id: string;
+  created_time: string;
+  last_edited_time: string;
+  in_trash: boolean;
+  properties: Properties;
+  url: string;
+  public_url: string | null;
+}
