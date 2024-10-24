@@ -30,7 +30,7 @@ interface PlannerItem {
   plannable_date: string;
   plannable: Plannable;
   html_url: string;
-  context_name: string;
+  context_name: string; // Course name
   context_image: string | null;
 }
 
@@ -48,53 +48,35 @@ interface PlannerOverride {
   assignment_id: number;
 }
 
-interface Properties {
-  ID: {
-    rich_text: string; //TODO: type better
-  };
-  "Blocked Date": {
-    date: { start: string; end: string | null; time_zone: string | null };
-  };
-  Class: {
-    id: string;
-    type: "rich_text";
-    rich_text: string; //TODO: type better
-  };
-  Priority: {
-    status: string; //TODO: type better
-  };
-  Link: {
-    url: string;
-  };
-  Name: {
-    id: string;
-    type: "title";
-    title: string; //TODO: type better
-  };
-  Due: {
-    id: string;
-    type: "date";
-    date: { start: string; end: string | null; time_zone: string | null };
-  };
-  Status: {
-    id: string;
-    type: "status";
-    status: string; //TODO: type better
-  };
-  Estimate: {
-    id: string;
-    type: "select";
-    select: string; //TODO: type better
-  };
+interface CanvasAssignment {
+  title: string,
+  description?: string; // html
+  message?: string; // html
+  locked_for_user: boolean;
+  due_at: string;
+  lock_at: string;
+  unlock_at: string;
+  question_count: number;
 }
 
-interface Page {
+interface NotionAssignment {
   object: "page";
   id: string;
   created_time: string;
   last_edited_time: string;
   in_trash: boolean;
-  properties: Properties;
   url: string;
   public_url: string | null;
+  property_id: string;
+  property_blocked_date: {
+    start: string;
+    end: string | null;
+    time_zone: string | null;
+  };
+  property_status: "Locked" | "Not Started" | "Started" | "Completed";
 }
+
+type NotionRichText = {
+  type: string,
+  plain_text: string,
+}[]
