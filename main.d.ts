@@ -57,6 +57,7 @@ interface CanvasAssignment {
   lock_at: string;
   unlock_at: string;
   question_count: number;
+  html_url: string;
 }
 
 interface NotionAssignment {

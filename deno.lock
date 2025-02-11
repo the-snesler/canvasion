@@ -9,8 +9,7 @@
     "npm:@notionhq/client@^2.2.15": "2.2.15",
     "npm:@tryfabric/martian@*": "1.2.4",
     "npm:@tryfabric/martian@^1.2.4": "1.2.4",
-    "npm:p-limit@*": "6.1.0",
-    "npm:p-limit@^6.1.0": "6.1.0",
+    "npm:p-limit@^6.2.0": "6.2.0",
     "npm:turndown@*": "7.2.0",
     "npm:turndown@^7.2.0": "7.2.0"
   },
@@ -312,8 +311,8 @@
         "whatwg-url"
       ]
     },
-    "p-limit@6.1.0": {
-      "integrity": "sha512-H0jc0q1vOzlEk0TqAKXKZxdl7kX3OFUzCnNVUnq5Pc3DGo0kpeaMuPqxQn235HibwBEb0/pm9dgKTjXy66fBkg==",
+    "p-limit@6.2.0": {
+      "integrity": "sha512-kuUqqHNUqoIWp/c467RI4X6mmyuojY5jGutNU0wVTmEOOfcuwLqyMVoAi9MKi2Ak+5i9+nhmrK4ufZE8069kHA==",
       "dependencies": [
         "yocto-queue"
       ]
@@ -433,7 +432,7 @@
       "jsr:@std/dotenv@~0.225.2",
       "npm:@notionhq/client@^2.2.15",
       "npm:@tryfabric/martian@^1.2.4",
-      "npm:p-limit@^6.1.0",
+      "npm:p-limit@^6.2.0",
       "npm:turndown@^7.2.0"
     ]
   }

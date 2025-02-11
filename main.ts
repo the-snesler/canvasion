@@ -107,30 +107,28 @@ export function getNotionDatabase(): Promise<NotionAssignment[]> {
  * Compare two arrays of objects by a key. Items from a and b are paired together when the values of their chosen keys match.
  */
 export function mergeByKey<U, T>(a: U[], b: T[], keyA: keyof U, keyB: keyof T): { both: (U & T)[], onlyA: U[], onlyB: T[] } {
-  const aKeys = a.map(item => ({ key: item[keyA], item }));
-  const bKeys = b.map(item => ({ key: item[keyB], item }));
+  const aKeys: ({ key: U[keyof U]; item: U; } | null)[] = a.map(item => ({ key: item[keyA], item }));
+  const bKeys: ({ key: T[keyof T]; item: T; } | null)[] = b.map(item => ({ key: item[keyB], item }));
   const both = [];
   for (let i = 0; i < aKeys.length; i++) {
-    const aItem = aKeys[i];
+    const aItem = aKeys[i]!;
     const bIndex = bKeys.findIndex(bItem => bItem && bItem.key === (aItem.key as unknown));
     if (bIndex !== -1) {
-      both.push({ ...aItem.item, ...bKeys[bIndex].item });
-      // @ts-ignore deno-ts(2322) - it's far more efficent to set an item to false than to splice it out
-      bKeys[bIndex] = false;
-      // @ts-ignore deno-ts(2322) - see above
-      aKeys[i] = false;
+      both.push({ ...aItem.item, ...bKeys[bIndex]!.item });
+      bKeys[bIndex] = null;
+      aKeys[i] = null;
     }
   }
   return {
     both,
-    onlyA: aKeys.filter(e => e).map(e => e.item),
-    onlyB: bKeys.filter(e => e).map(e => e.item)
+    onlyA: aKeys.filter(e => e).map(e => e!.item),
+    onlyB: bKeys.filter(e => e).map(e => e!.item)
   };
 }
 
-export function OpenAIEstimates(assignment: PlannerItem & CanvasAssignment): Promise<"" | "XS" | "S" | "M" | "L" | "XL"> {
+export function GetOpenAIEstimate(planner: PlannerItem, assignment: CanvasAssignment): Promise<"" | "XS" | "S" | "M" | "L" | "XL"> {
   const assignment_title = assignment.title;
-  const course_name = assignment.context_name;
+  const course_name = planner.context_name;
   const markdown = turndown.turndown(assignment.description || assignment.message).slice(0, 3000);
   const token = Deno.env.get("OPENAI_API_KEY");
   const model = Deno.env.get("OPENAI_MODEL");
@@ -162,7 +160,7 @@ export function OpenAIEstimates(assignment: PlannerItem & CanvasAssignment): Pro
   }).catch(err => { throw new Error(err) }));
 }
 
-export function addAssignmentToNotion(assignment: PlannerItem & CanvasAssignment & { estimate?: "" | "XS" | "S" | "M" | "L" | "XL" }) {
+export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL" ) {
   const baseUrl = Deno.env.get("CANVAS_URL");
   const databaseID = Deno.env.get("NOTION_DATABASE_ID");
   if (!databaseID || !baseUrl) {
@@ -188,7 +186,7 @@ export function addAssignmentToNotion(assignment: PlannerItem & CanvasAssignment
         rich_text: [
           {
             text: {
-              content: assignment.plannable_id.toString()
+              content: planner.plannable_id.toString()
             }
           }
         ]
@@ -207,7 +205,7 @@ export function addAssignmentToNotion(assignment: PlannerItem & CanvasAssignment
         rich_text: [
           {
             text: {
-              content: assignment.context_name.replace(/:.*/, "")
+              content: planner.context_name.replace(/:.*/, "")
             }
           }
         ]
@@ -217,7 +215,7 @@ export function addAssignmentToNotion(assignment: PlannerItem & CanvasAssignment
       },
       estimate: {
         select: {
-          name: assignment.estimate || "M"
+          name: estimate || "M"
         }
       }
     },
@@ -233,16 +231,17 @@ if (import.meta.main) {
   const { both, onlyA: onlyCanvas } = mergeByKey(canvasPlanner, notionDatabase, "plannable_id", "property_id");
   // Add new assignments to Notion
   const assignments = onlyCanvas.filter(assignment => assignment.plannable_type !== "calendar_event");
-  const assignmentData = await Promise.all(assignments.map(getCanvasAssignmentDetails));
-  const mergedAssignments = assignments.map((assignment, i) => ({ ...assignment, ...assignmentData[i] }));
-  // OpenAI Categorization (we only care about the assignments that are not locked)
-  const unlockedAssgn = mergedAssignments.filter(assignment => !assignment.locked_for_user);
-  const lockedAssgn = mergedAssignments.filter(assignment => assignment.locked_for_user);
-  const assgnEstimates = await Promise.all(unlockedAssgn.map(OpenAIEstimates));
-  const mergedEstimates = unlockedAssgn.map((assignment, i) => ({ ...assignment, estimate: assgnEstimates[i] }));
-  // Add to Notion
-  await Promise.all(mergedEstimates.map(addAssignmentToNotion));
-  await Promise.all(lockedAssgn.map(addAssignmentToNotion));
+  assignments.forEach(async (planner) => {
+    const assignment = await getCanvasAssignmentDetails(planner);
+    // OpenAI Categorization (we only care about the assignments that are not locked)
+    const isLocked = assignment.locked_for_user;
+    if (isLocked) {
+      await addAssignmentToNotion(planner, assignment);
+    }
+    const estimate = await GetOpenAIEstimate(planner, assignment);
+    // Add to Notion
+    await addAssignmentToNotion(planner, assignment, estimate);
+  })
   // Update assignments already in Notion
   // both.forEach(async (assignment) => {
     // TODO: Update due date on all assignments
