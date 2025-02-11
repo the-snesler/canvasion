@@ -1,5 +1,5 @@
 import { assertEquals, assertObjectMatch } from "@std/assert";
-import { flattenNotionProperties, mergeByKey } from "./main.ts";
+import { flattenNotionProperties, mergeByKey, processDueDate, SyncManager, UserConfig } from "./main.ts";
 
 Deno.test(function mergeEntriesByKey() {
   const a = [
@@ -63,4 +63,60 @@ Deno.test(function flattenedProperties() {
     property_id: "2466239"
   };
   assertObjectMatch(flattenNotionProperties(page), flattened);
-})
+});
+
+Deno.test(function processDueDateTests() {
+  // Test empty and invalid input
+  assertEquals(processDueDate(""), "");
+  assertEquals(processDueDate("invalid"), "");
+
+  // Test specific times
+  assertEquals(
+    processDueDate("2025-02-13T14:30:00Z"),
+    "2025-02-13T14:30:00Z"
+  );
+
+  // Test 00:59:00 AM and 05:59:59 AM (last day midnight)
+  assertEquals(
+    processDueDate("2025-02-13T00:59:00Z"),
+    "2025-02-12"
+  );
+  assertEquals(
+    processDueDate("2025-02-13T05:59:59Z"),
+    "2025-02-12"
+  );
+  // Test 11:59:59 PM, and 11:59:00 PM (same day midnight)
+  assertEquals(
+    processDueDate("2025-02-13T23:59:59Z"),
+    "2025-02-13"
+  );
+  assertEquals(
+    processDueDate("2025-02-13T23:59:00Z"),
+    "2025-02-13"
+  );
+});
+
+Deno.test(async function syncManagerTests() {
+  const manager = new SyncManager();
+  const testConfig: UserConfig = {
+    canvasURL: "https://canvas.test",
+    canvasAPIKey: "test-key",
+    notionAPIKey: "test-key",
+    notionDatabaseID: "test-id",
+    openAIAPIKey: "test-key",
+    openAIModel: "test-model"
+  };
+
+  try {
+    // Test adding and removing users
+    manager.addUser("test-user", testConfig);
+    manager.removeUser("test-user");
+
+    // Test starting and stopping
+    await manager.start();
+    manager.stop();
+  } finally {
+    // Ensure cleanup even if test fails
+    manager.stop();
+  }
+});

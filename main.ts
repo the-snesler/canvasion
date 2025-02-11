@@ -1,12 +1,13 @@
-import "jsr:@std/dotenv/load";
 import { Client, isFullPage } from "npm:@notionhq/client"
 import TurndownService from "npm:turndown";
 import Bottleneck from "npm:bottleneck";
 import { markdownToBlocks } from "npm:@tryfabric/martian";
 import { OpenAIConfig, systemPrompt } from "./const.ts";
+import type { PlannerItem, CanvasAssignment, NotionAssignment, NotionRichText, PlannerOverride } from "./main.d.ts";
 
 const ONE_DAY = 8.64e7;
 const DAYS_TO_FETCH = 16;
+const REFRESH_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
 const turndown = new TurndownService();
 const canvasRateLimit = new Bottleneck({
   maxConcurrent: 1,
@@ -20,6 +21,65 @@ const openaiRateLimit = new Bottleneck({
   maxConcurrent: 1,
   minTime: 333
 });
+
+export interface UserConfig {
+  canvasURL: string;
+  canvasAPIKey: string;
+  notionAPIKey: string;
+  notionDatabaseID: string;
+  openAIAPIKey: string;
+  openAIModel: string;
+}
+
+export class SyncManager {
+  private users: Map<string, UserConfig> = new Map();
+  private intervalId?: number;
+
+  addUser(userId: string, config: UserConfig): void {
+    this.users.set(userId, config);
+  }
+
+  removeUser(userId: string): void {
+    this.users.delete(userId);
+  }
+
+  async start(): Promise<void> {
+    // Initial sync for all users
+    await this.syncAll();
+    
+    // Start refresh loop
+    this.intervalId = setInterval(async () => {
+      await this.syncAll();
+    }, REFRESH_INTERVAL);
+  }
+
+  stop(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = undefined;
+    }
+  }
+
+  private async syncAll(): Promise<void> {
+    const syncPromises = Array.from(this.users.entries()).map(async ([userId, config]) => {
+      try {
+        await runApp(
+          config.canvasURL,
+          config.canvasAPIKey,
+          config.notionAPIKey,
+          config.notionDatabaseID,
+          config.openAIAPIKey,
+          config.openAIModel
+        );
+        console.log(`Successfully synced user ${userId}`);
+      } catch (error) {
+        console.error(`Failed to sync user ${userId}:`, error);
+      }
+    });
+
+    await Promise.all(syncPromises);
+  }
+}
 
 /**
  * Process a due date to determine if it should be truncated.
@@ -40,11 +100,10 @@ export function processDueDate(isoDate: string): string {
   const hours = date.getUTCHours();
   const minutes = date.getUTCMinutes();
   const seconds = date.getUTCSeconds();
-  
   // If time is X:59:59 or X:59:00 (typical midnight assignments)
   // return just the date portion in YYYY-MM-DD format
-  // Timezones are tricky here: if our "midnight assignment" is due at 0:59:59 or later, we want to return the day before
-  if ((minutes === 59 && (seconds === 59 || seconds === 0)) || (hours === 0 && minutes === 0 && seconds === 0)) {
+  // Timezones are tricky here: if our "midnight assignment" is due at 0:59:00 or later, we want to return the day before
+  if (minutes === 59 && (seconds === 59 || seconds === 0)) {
     const shouldReturnYesterday = hours < 12;
     const yesterday = new Date(date.getTime() - ONE_DAY);
     return shouldReturnYesterday ? yesterday.toISOString().split('T')[0] : date.toISOString().split('T')[0];
@@ -366,6 +425,7 @@ async function runApp(canvasURL: string,
 }
 
 if (import.meta.main) {
+  await import("jsr:@std/dotenv/load");
   const canvasURL = Deno.env.get("CANVAS_URL");
   const canvasAPIKey = Deno.env.get("CANVAS_API_KEY");
   const notionAPIKey = Deno.env.get("NOTION_API_KEY");
@@ -376,6 +436,22 @@ if (import.meta.main) {
   if (!canvasURL || !canvasAPIKey || !notionAPIKey || !notionDatabaseID || !openAIAPIKey || !openAIModel) {
     console.error("Missing environment variables. Please set CANVAS_URL, CANVAS_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID, OPENAI_API_KEY, and OPENAI_MODEL.");
   } else {
-    await runApp(canvasURL, canvasAPIKey, notionAPIKey, notionDatabaseID, openAIAPIKey, openAIModel);
+    const syncManager = new SyncManager();
+    
+    // Add the initial user from environment variables
+    syncManager.addUser("default", {
+      canvasURL,
+      canvasAPIKey,
+      notionAPIKey,
+      notionDatabaseID,
+      openAIAPIKey,
+      openAIModel
+    });
+
+    // Start the sync manager
+    await syncManager.start();
+
+    // Keep the process running
+    await new Promise(() => {});
   }
 }

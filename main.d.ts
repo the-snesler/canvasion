@@ -10,7 +10,7 @@ interface Submission {
   redo_request: boolean;
 }
 
-interface Plannable {
+export interface Plannable {
   id: number;
   title: string;
   created_at: string;
@@ -20,7 +20,7 @@ interface Plannable {
   todo_date?: string;
 }
 
-interface PlannerItem {
+export interface PlannerItem {
   context_type: string;
   course_id: number;
   plannable_id: number;
@@ -35,7 +35,7 @@ interface PlannerItem {
   context_image: string | null;
 }
 
-interface PlannerOverride {
+export interface PlannerOverride {
   id: number;
   plannable_type: string;
   plannable_id: number;
@@ -49,7 +49,7 @@ interface PlannerOverride {
   assignment_id: number;
 }
 
-interface CanvasAssignment {
+export interface CanvasAssignment {
   title: string,
   description?: string; // html
   message?: string; // html
@@ -61,7 +61,7 @@ interface CanvasAssignment {
   html_url: string;
 }
 
-interface NotionAssignment {
+export interface NotionAssignment {
   object: "page";
   id: string;
   created_time: string;
@@ -80,7 +80,7 @@ interface NotionAssignment {
   };
 }
 
-type NotionRichText = {
+export type NotionRichText = {
   type: string,
   plain_text: string,
 }[]
