@@ -7,9 +7,6 @@ import { OpenAIConfig, systemPrompt } from "./const.ts";
 
 const ONE_DAY = 8.64e7;
 const DAYS_TO_FETCH = 16;
-const notion = new Client({
-  auth: Deno.env.get("NOTION_API_KEY")
-})
 const turndown = new TurndownService();
 const canvasRateLimit = new Bottleneck({
   maxConcurrent: 1,
@@ -24,8 +21,8 @@ const openaiRateLimit = new Bottleneck({
   minTime: 333
 });
 
-export function getCanvasUserID(): Promise<number> {
-  return canvasRateLimit.schedule(() => fetch(Deno.env.get("CANVAS_URL") + "/api/v1/users/self", { headers: { Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}` } })
+export function getCanvasUserID(canvasURL: string, canvasAPIKey: string): Promise<number> {
+  return canvasRateLimit.schedule(() => fetch(canvasURL + "/api/v1/users/self", { headers: { Authorization: `Bearer ${canvasAPIKey}` } })
     .then(res => {
       if (!res.ok) {
         throw new Error("Failed to fetch Canvas user ID");
@@ -36,20 +33,13 @@ export function getCanvasUserID(): Promise<number> {
     .catch(err => { throw new Error(err) }));
 }
 
-export function getCanvasPlanner(): Promise<PlannerItem[]> {
-  const baseUrl = Deno.env.get("CANVAS_URL");
-  const token = Deno.env.get("CANVAS_API_KEY");
-  if (!baseUrl) {
-    throw new Error("Canvas URL needs to be set");
-  } else if (!token) {
-    throw new Error("Canvas token needs to be set");
-  }
+export function getCanvasPlanner(canvasURL: string, canvasAPIKey: string): Promise<PlannerItem[]> {
   const query = new URLSearchParams({
     start_date: new Date(Date.now() - 8.64e7).toISOString(),
     end_date: new Date(Date.now() + DAYS_TO_FETCH * ONE_DAY).toISOString(),
     per_page: "75"
   });
-  return fetch(baseUrl + "/api/v1/planner/items?" + query.toString(), { headers: { Authorization: `Bearer ${token}` } })
+  return fetch(canvasURL + "/api/v1/planner/items?" + query.toString(), { headers: { Authorization: `Bearer ${canvasAPIKey}` } })
     .then(res => {
       if (!res.ok) {
         throw new Error("Failed to fetch Canvas planner");
@@ -59,15 +49,8 @@ export function getCanvasPlanner(): Promise<PlannerItem[]> {
     .catch(err => { throw new Error(err) });
 }
 
-export function getCanvasAssignmentDetails(planner: PlannerItem): Promise<CanvasAssignment> {
-  const baseUrl = Deno.env.get("CANVAS_URL");
-  const token = Deno.env.get("CANVAS_API_KEY");
-  if (!baseUrl) {
-    throw new Error("Canvas URL needs to be set");
-  } else if (!token) {
-    throw new Error("Canvas token needs to be set");
-  }
-  return canvasRateLimit.schedule(() => fetch(baseUrl + "/api/v1" + planner.html_url, { headers: { Authorization: `Bearer ${token}` } })
+export function getCanvasAssignmentDetails(canvasURL: string, canvasAPIKey: string, planner: PlannerItem): Promise<CanvasAssignment> {
+  return canvasRateLimit.schedule(() => fetch(canvasURL + "/api/v1" + planner.html_url, { headers: { Authorization: `Bearer ${canvasAPIKey}` } })
     .then(res => {
       if (!res.ok) {
         throw new Error("Failed to fetch Canvas assignment details: " + res.statusText);
@@ -96,13 +79,9 @@ export function flattenNotionProperties(page: { properties: { [key: string]: { t
   return { ...page, ...flattened } as unknown as NotionAssignment;
 }
 
-export function getNotionDatabase(): Promise<NotionAssignment[]> {
-  const databaseID = Deno.env.get("NOTION_DATABASE_ID");
-  if (!databaseID) {
-    throw new Error("Database ID is not set");
-  }
-  const notionQuery = (start_cursor?: string) => notion.databases.query({
-    database_id: databaseID,
+export function getNotionDatabase(notionClient: Client, notionDatabaseID: string): Promise<NotionAssignment[]> {
+  const notionQuery = (start_cursor?: string) => notionClient.databases.query({
+    database_id: notionDatabaseID,
     filter: {
       property: "Last edited time",
       date: {
@@ -151,14 +130,12 @@ export function mergeByKey<U, T>(a: U[], b: T[], keyA: keyof U, keyB: keyof T): 
   };
 }
 
-export function GetOpenAIEstimate(planner: PlannerItem, assignment: CanvasAssignment): Promise<"" | "XS" | "S" | "M" | "L" | "XL"> {
+export function GetOpenAIEstimate(openAIAPIKey: string, openAIModel: string, planner: PlannerItem, assignment: CanvasAssignment): Promise<"" | "XS" | "S" | "M" | "L" | "XL"> {
   const assignment_title = assignment.title;
   const course_name = planner.context_name;
   const description = assignment.description || assignment.message;
   const markdown = turndown.turndown(description).slice(0, 3000);
-  const token = Deno.env.get("OPENAI_API_KEY");
-  const model = Deno.env.get("OPENAI_MODEL");
-  if (!token || !model) {
+  if (!openAIAPIKey || !openAIModel) {
     console.warn("OpenAI API key or model not set");
     return Promise.resolve("");
   }
@@ -186,19 +163,14 @@ export function GetOpenAIEstimate(planner: PlannerItem, assignment: CanvasAssign
   }).catch(err => { throw new Error(err) }));
 }
 
-export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL") {
-  const baseUrl = Deno.env.get("CANVAS_URL");
-  const databaseID = Deno.env.get("NOTION_DATABASE_ID");
-  if (!databaseID || !baseUrl) {
-    throw new Error("How did we get here?");
-  }
+export function addAssignmentToNotion(canvasURL: string,  notionClient: Client, notionDatabaseID: string, planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL") {
   const description = assignment.description || assignment.message || "";
   const plannableDue = planner.plannable.due_at || planner.plannable.todo_date || assignment.due_at || "";
   const markdown = turndown.turndown(description).slice(0, 3000);
-  return notionRateLimit.schedule(() => notion.pages.create({
+  return notionRateLimit.schedule(() => notionClient.pages.create({
     "parent": {
       "type": "database_id",
-      "database_id": databaseID
+      "database_id": notionDatabaseID
     },
     "properties": {
       "Name": {
@@ -239,7 +211,7 @@ export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAs
         ]
       },
       "Link": {
-        url: baseUrl + assignment.html_url
+        url: canvasURL + assignment.html_url
       },
       "Estimate": {
         select: {
@@ -257,8 +229,18 @@ export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAs
   }));
 }
 
-if (import.meta.main) {
-  const [canvasUserID, canvasPlanner, notionDatabase] = await Promise.all([getCanvasUserID(), getCanvasPlanner(), getNotionDatabase()]);
+async function runApp(canvasURL: string,
+  canvasAPIKey: string,
+  notionAPIKey: string,
+  notionDatabaseID: string,
+  openAIAPIKey: string,
+  openAIModel: string) {
+  const notionClient = new Client({
+    auth: notionAPIKey
+  })
+  const canvasUserID = await getCanvasUserID(canvasURL, canvasAPIKey);
+  const canvasPlanner = await getCanvasPlanner(canvasURL, canvasAPIKey);
+  const notionDatabase = await getNotionDatabase(notionClient, notionDatabaseID);
   const { both, onlyA: onlyCanvas } = mergeByKey(canvasPlanner, notionDatabase, "plannable_id", "property_id");
   // Add new assignments to Notion
   const assignments = onlyCanvas.filter(assignment => assignment.plannable_type !== "calendar_event");
@@ -266,12 +248,12 @@ if (import.meta.main) {
     if (planner.html_url.includes("/submissions/")) {
       planner.html_url = planner.html_url.replace(/\/submissions\/\d+$/, "");
     }
-    const assignment = await getCanvasAssignmentDetails(planner);
+    const assignment = await getCanvasAssignmentDetails(canvasURL, canvasAPIKey, planner);
     if (assignment.locked_for_user) return;
     // OpenAI Categorization (we only care about the assignments that are not locked)
-    const estimate = await GetOpenAIEstimate(planner, assignment);
+    const estimate = await GetOpenAIEstimate(openAIAPIKey, openAIModel, planner, assignment);
     // Add to Notion
-    await addAssignmentToNotion(planner, assignment, estimate);
+    await addAssignmentToNotion(canvasURL, notionClient, notionDatabaseID, planner, assignment, estimate);
   })
   // Update assignments already in Notion
   const updatePromises = both.map(async ([planner, nassign]) => {
@@ -283,7 +265,7 @@ if (import.meta.main) {
     const isNotionDone = nassign.property_status.name === "Completed";
     // Update due date on assignments with different due dates
     if (isDifferentDueDate) {
-      await notionRateLimit.schedule(() => notion.pages.update({
+      await notionRateLimit.schedule(() => notionClient.pages.update({
         page_id: nassign.id,
         properties: {
           "Due Date": {
@@ -296,7 +278,7 @@ if (import.meta.main) {
     }
     // Update Notion status on Canvas completed assignments
     if (isCanvasDone && isNotionNotStarted) {
-      await notionRateLimit.schedule(() => notion.pages.update({
+      await notionRateLimit.schedule(() => notionClient.pages.update({
         page_id: nassign.id,
         properties: {
           "Status": {
@@ -309,10 +291,10 @@ if (import.meta.main) {
     }
     // Update Canvas status on Notion completed assignments
     if (isNotionDone && !isCanvasDone && !isCanvasOverrideSet) {
-      await canvasRateLimit.schedule(() => fetch(`${Deno.env.get("CANVAS_URL")}/api/v1/planner/overrides`, {
+      await canvasRateLimit.schedule(() => fetch(`${canvasURL}/api/v1/planner/overrides`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}`,
+          Authorization: `Bearer ${canvasAPIKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -326,10 +308,10 @@ if (import.meta.main) {
     }
     if (isNotionDone && !isCanvasDone && isCanvasOverrideSet) {
       const plannerOverride = planner.planner_override as PlannerOverride;
-      await canvasRateLimit.schedule(() => fetch(`${Deno.env.get("CANVAS_URL")}/api/v1/planner/overrides/${plannerOverride.id}`, {
+      await canvasRateLimit.schedule(() => fetch(`${canvasURL}/api/v1/planner/overrides/${plannerOverride.id}`, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}`,
+          Authorization: `Bearer ${canvasAPIKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -343,4 +325,19 @@ if (import.meta.main) {
     }
   });
   await Promise.all([...newPromises, ...updatePromises]);
+}
+
+if (import.meta.main) {
+  const canvasURL = Deno.env.get("CANVAS_URL");
+  const canvasAPIKey = Deno.env.get("CANVAS_API_KEY");
+  const notionAPIKey = Deno.env.get("NOTION_API_KEY");
+  const notionDatabaseID = Deno.env.get("NOTION_DATABASE_ID");
+  const openAIAPIKey = Deno.env.get("OPENAI_API_KEY");
+  const openAIModel = Deno.env.get("OPENAI_MODEL");
+
+  if (!canvasURL || !canvasAPIKey || !notionAPIKey || !notionDatabaseID || !openAIAPIKey || !openAIModel) {
+    console.error("Missing environment variables. Please set CANVAS_URL, CANVAS_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID, OPENAI_API_KEY, and OPENAI_MODEL.");
+  } else {
+    await runApp(canvasURL, canvasAPIKey, notionAPIKey, notionDatabaseID, openAIAPIKey, openAIModel);
+  }
 }
