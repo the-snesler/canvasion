@@ -21,6 +21,39 @@ const openaiRateLimit = new Bottleneck({
   minTime: 333
 });
 
+/**
+ * Process a due date to determine if it should be truncated.
+ * If the time is X:59:59 or X:59:00 (typical midnight assignments),
+ * returns just the date portion. Otherwise, returns the full ISO string
+ * to preserve the specific time.
+ * @param isoDate An ISO date string (e.g. "2025-02-13T05:59:59Z")
+ * @returns ISO date string, either date-only or with time based on the rules
+ */
+export function processDueDate(isoDate: string): string {
+  if (!isoDate) return "";
+  
+  // Parse the date, which handles various ISO formats
+  const date = new Date(isoDate);
+  if (isNaN(date.getTime())) return "";
+  
+  // Extract hours, minutes, seconds
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+  const seconds = date.getUTCSeconds();
+  
+  // If time is X:59:59 or X:59:00 (typical midnight assignments)
+  // return just the date portion in YYYY-MM-DD format
+  // Timezones are tricky here: if our "midnight assignment" is due at 0:59:59 or later, we want to return the day before
+  if ((minutes === 59 && (seconds === 59 || seconds === 0)) || (hours === 0 && minutes === 0 && seconds === 0)) {
+    const shouldReturnYesterday = hours < 12;
+    const yesterday = new Date(date.getTime() - ONE_DAY);
+    return shouldReturnYesterday ? yesterday.toISOString().split('T')[0] : date.toISOString().split('T')[0];
+  }
+  
+  // For specific times, return in a consistent format: YYYY-MM-DDTHH:mm:ssZ
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export function getCanvasUserID(canvasURL: string, canvasAPIKey: string): Promise<number> {
   return canvasRateLimit.schedule(() => fetch(canvasURL + "/api/v1/users/self", { headers: { Authorization: `Bearer ${canvasAPIKey}` } })
     .then(res => {
@@ -163,7 +196,7 @@ export function GetOpenAIEstimate(openAIAPIKey: string, openAIModel: string, pla
   }).catch(err => { throw new Error(err) }));
 }
 
-export function addAssignmentToNotion(canvasURL: string,  notionClient: Client, notionDatabaseID: string, planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL") {
+export function addAssignmentToNotion(notionClient: Client, notionDatabaseID: string, planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL") {
   const description = assignment.description || assignment.message || "";
   const plannableDue = planner.plannable.due_at || planner.plannable.todo_date || assignment.due_at || "";
   const markdown = turndown.turndown(description).slice(0, 3000);
@@ -193,7 +226,7 @@ export function addAssignmentToNotion(canvasURL: string,  notionClient: Client, 
       },
       "Due Date": {
         date: {
-          start: new Date(plannableDue).toDateString().split('T', 1)[0]
+          start: processDueDate(plannableDue)
         }
       },
       "Status": {
@@ -211,7 +244,7 @@ export function addAssignmentToNotion(canvasURL: string,  notionClient: Client, 
         ]
       },
       "Link": {
-        url: canvasURL + assignment.html_url
+        url: assignment.html_url
       },
       "Estimate": {
         select: {
@@ -243,7 +276,10 @@ async function runApp(canvasURL: string,
   const notionDatabase = await getNotionDatabase(notionClient, notionDatabaseID);
   const { both, onlyA: onlyCanvas } = mergeByKey(canvasPlanner, notionDatabase, "plannable_id", "property_id");
   // Add new assignments to Notion
-  const assignments = onlyCanvas.filter(assignment => assignment.plannable_type !== "calendar_event");
+  const assignments = onlyCanvas.filter(assignment => 
+    assignment.plannable_type !== "calendar_event" && 
+    assignment.plannable_type !== "announcement"
+  );
   const newPromises = assignments.map(async (planner) => {
     if (planner.html_url.includes("/submissions/")) {
       planner.html_url = planner.html_url.replace(/\/submissions\/\d+$/, "");
@@ -253,24 +289,26 @@ async function runApp(canvasURL: string,
     // OpenAI Categorization (we only care about the assignments that are not locked)
     const estimate = await GetOpenAIEstimate(openAIAPIKey, openAIModel, planner, assignment);
     // Add to Notion
-    await addAssignmentToNotion(canvasURL, notionClient, notionDatabaseID, planner, assignment, estimate);
+    await addAssignmentToNotion(notionClient, notionDatabaseID, planner, assignment, estimate);
   })
   // Update assignments already in Notion
   const updatePromises = both.map(async ([planner, nassign]) => {
     const plannableDue = planner.plannable.due_at || planner.plannable.todo_date || "";
-    const isDifferentDueDate = new Date(plannableDue).toDateString() !== new Date(nassign.property_due_date.start).toDateString();
+    const processedCanvasDate = processDueDate(plannableDue);
+    const processedNotionDate = processDueDate(nassign.property_due_date?.start || "");
+    const isDifferentDueDate = processedCanvasDate !== processedNotionDate;
     const isCanvasDone = planner.submissions.submitted || (planner.planner_override && planner.planner_override.marked_complete) || false;
     const isCanvasOverrideSet = planner.planner_override !== false;
     const isNotionNotStarted = nassign.property_status.name === "Not Started";
     const isNotionDone = nassign.property_status.name === "Completed";
     // Update due date on assignments with different due dates
-    if (isDifferentDueDate) {
+    if (isDifferentDueDate && !isCanvasDone && processedCanvasDate.length > 0) {
       await notionRateLimit.schedule(() => notionClient.pages.update({
         page_id: nassign.id,
         properties: {
           "Due Date": {
             date: {
-              start: new Date(plannableDue).toISOString().split('T', 1)[0]
+              start: processedCanvasDate
             }
           }
         }

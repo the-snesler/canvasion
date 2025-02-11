@@ -16,7 +16,7 @@ interface Plannable {
   created_at: string;
   updated_at: string;
   points_possible: number;
-  due_at?: string;
+  due_at?: string; // ISO time string (UTC)
   todo_date?: string;
 }
 
@@ -54,7 +54,7 @@ interface CanvasAssignment {
   description?: string; // html
   message?: string; // html
   locked_for_user: boolean;
-  due_at: string;
+  due_at: string; // ISO time string (UTC)
   lock_at: string;
   unlock_at: string;
   question_count: number;
@@ -70,13 +70,8 @@ interface NotionAssignment {
   url: string;
   public_url: string | null;
   property_id: string;
-  property_blocked_date: {
-    start: string;
-    end: string | null;
-    time_zone: string | null;
-  };
-  property_due_date: {
-    start: string;
+  property_due_date?: {
+    start: string; // ISO time string
     end: string | null;
     time_zone: string | null;
   };
