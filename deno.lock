@@ -9,7 +9,8 @@
     "npm:@notionhq/client@^2.2.15": "2.2.15",
     "npm:@tryfabric/martian@*": "1.2.4",
     "npm:@tryfabric/martian@^1.2.4": "1.2.4",
-    "npm:p-limit@^6.2.0": "6.2.0",
+    "npm:bottleneck@*": "2.19.5",
+    "npm:bottleneck@^2.19.5": "2.19.5",
     "npm:turndown@*": "7.2.0",
     "npm:turndown@^7.2.0": "7.2.0"
   },
@@ -82,6 +83,9 @@
     },
     "bail@1.0.5": {
       "integrity": "sha512-xFbRxM1tahm08yHBP16MMjVUAvDaBMD38zsM9EMAUN61omwLmKlOpB/Zku5QkjZ8TZ4vn53pj+t518cH0S03RQ=="
+    },
+    "bottleneck@2.19.5": {
+      "integrity": "sha512-VHiNCbI1lKdl44tGrhNfU3lup0Tj/ZBMJB5/2ZbNXRCPuRCO7ed2mgcK4r17y+KB2EfuYuRaVlwNbAeaWGSpbw=="
     },
     "ccount@1.1.0": {
       "integrity": "sha512-vlNK021QdI7PNeiUh/lKkC/mNHHfV0m/Ad5JoI0TYtlBnJAslM/JIkm/tGC88bkLIwO6OQ5uV6ztS6kVAtCDlg=="
@@ -311,12 +315,6 @@
         "whatwg-url"
       ]
     },
-    "p-limit@6.2.0": {
-      "integrity": "sha512-kuUqqHNUqoIWp/c467RI4X6mmyuojY5jGutNU0wVTmEOOfcuwLqyMVoAi9MKi2Ak+5i9+nhmrK4ufZE8069kHA==",
-      "dependencies": [
-        "yocto-queue"
-      ]
-    },
     "parse-entities@2.0.0": {
       "integrity": "sha512-kkywGpCcRYhqQIchaWqZ875wzpS/bMKhz5HnN3p7wveJTkTtyAB/AlnS0f8DFSqYW1T82t6yEAkEcB+A1I3MbQ==",
       "dependencies": [
@@ -419,9 +417,6 @@
         "webidl-conversions"
       ]
     },
-    "yocto-queue@1.1.1": {
-      "integrity": "sha512-b4JR1PFR10y1mKjhHY9LaGo6tmrgjit7hxVIeAmyMw3jegXR4dhYqLaQF5zMXZxY7tLpMyJeLjr1C4rLmkVe8g=="
-    },
     "zwitch@1.0.5": {
       "integrity": "sha512-V50KMwwzqJV0NpZIZFwfOD5/lyny3WlSzRiXgA0G7VUnRlqttta1L6UQIHzd6EuBY/cHGfwTIck7w1yH6Q5zUw=="
     }
@@ -432,7 +427,7 @@
       "jsr:@std/dotenv@~0.225.2",
       "npm:@notionhq/client@^2.2.15",
       "npm:@tryfabric/martian@^1.2.4",
-      "npm:p-limit@^6.2.0",
+      "npm:bottleneck@^2.19.5",
       "npm:turndown@^7.2.0"
     ]
   }

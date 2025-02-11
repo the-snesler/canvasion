@@ -1,7 +1,7 @@
 import "jsr:@std/dotenv/load";
 import { Client, isFullPage } from "npm:@notionhq/client"
 import TurndownService from "npm:turndown";
-import pLimit from "npm:p-limit";
+import Bottleneck from "npm:bottleneck";
 import { markdownToBlocks } from "npm:@tryfabric/martian";
 import { OpenAIConfig, systemPrompt } from "./const.ts";
 
@@ -11,8 +11,30 @@ const notion = new Client({
   auth: Deno.env.get("NOTION_API_KEY")
 })
 const turndown = new TurndownService();
-const limit = pLimit(2);
+const canvasRateLimit = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: 333
+});
+const notionRateLimit = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: 333
+});
+const openaiRateLimit = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: 333
+});
 
+export function getCanvasUserID(): Promise<number> {
+  return canvasRateLimit.schedule(() => fetch(Deno.env.get("CANVAS_URL") + "/api/v1/users/self", { headers: { Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}` } })
+    .then(res => {
+      if (!res.ok) {
+        throw new Error("Failed to fetch Canvas user ID");
+      }
+      return res.json()
+    })
+    .then(res => res.id)
+    .catch(err => { throw new Error(err) }));
+}
 
 export function getCanvasPlanner(): Promise<PlannerItem[]> {
   const baseUrl = Deno.env.get("CANVAS_URL");
@@ -45,10 +67,10 @@ export function getCanvasAssignmentDetails(planner: PlannerItem): Promise<Canvas
   } else if (!token) {
     throw new Error("Canvas token needs to be set");
   }
-  return limit(() => fetch(baseUrl + planner.html_url, { headers: { Authorization: `Bearer ${token}` } })
+  return canvasRateLimit.schedule(() => fetch(baseUrl + "/api/v1" + planner.html_url, { headers: { Authorization: `Bearer ${token}` } })
     .then(res => {
       if (!res.ok) {
-        throw new Error("Failed to fetch Canvas assignment details");
+        throw new Error("Failed to fetch Canvas assignment details: " + res.statusText);
       }
       return res.json()
     })
@@ -90,31 +112,34 @@ export function getNotionDatabase(): Promise<NotionAssignment[]> {
     page_size: 100,
     start_cursor: start_cursor ?? undefined
   });
-  return notionQuery().then(async (res) => {
+  return notionRateLimit.schedule(() => notionQuery().then(async (res) => {
     const results = res.results;
     let response = res;
     while (response.has_more) {
       response = await notionQuery(response.next_cursor ?? undefined);
       results.push(...res.results);
     }
-    results.filter(e => isFullPage(e)).forEach(flattenNotionProperties);
-    return results as NotionAssignment[];
-  });
+    return results.filter(e => isFullPage(e)).map(flattenNotionProperties);
+  }));
 
 }
 
 /**
  * Compare two arrays of objects by a key. Items from a and b are paired together when the values of their chosen keys match.
+ * @param a The first array of objects
+ * @param b The second array of objects
+ * @param keyA The key to compare in the first array
+ * @param keyB The key to compare in the second array. Must point to the same type as keyA
  */
-export function mergeByKey<U, T>(a: U[], b: T[], keyA: keyof U, keyB: keyof T): { both: (U & T)[], onlyA: U[], onlyB: T[] } {
+export function mergeByKey<U, T>(a: U[], b: T[], keyA: keyof U, keyB: keyof T): { both: [U, T][], onlyA: U[], onlyB: T[] } {
   const aKeys: ({ key: U[keyof U]; item: U; } | null)[] = a.map(item => ({ key: item[keyA], item }));
   const bKeys: ({ key: T[keyof T]; item: T; } | null)[] = b.map(item => ({ key: item[keyB], item }));
   const both = [];
   for (let i = 0; i < aKeys.length; i++) {
     const aItem = aKeys[i]!;
-    const bIndex = bKeys.findIndex(bItem => bItem && bItem.key === (aItem.key as unknown));
+    const bIndex = bKeys.findIndex(bItem => bItem && bItem.key == (aItem.key as unknown));
     if (bIndex !== -1) {
-      both.push({ ...aItem.item, ...bKeys[bIndex]!.item });
+      both.push([aItem.item, bKeys[bIndex]!.item] as [U, T]);
       bKeys[bIndex] = null;
       aKeys[i] = null;
     }
@@ -129,14 +154,15 @@ export function mergeByKey<U, T>(a: U[], b: T[], keyA: keyof U, keyB: keyof T): 
 export function GetOpenAIEstimate(planner: PlannerItem, assignment: CanvasAssignment): Promise<"" | "XS" | "S" | "M" | "L" | "XL"> {
   const assignment_title = assignment.title;
   const course_name = planner.context_name;
-  const markdown = turndown.turndown(assignment.description || assignment.message).slice(0, 3000);
+  const description = assignment.description || assignment.message;
+  const markdown = turndown.turndown(description).slice(0, 3000);
   const token = Deno.env.get("OPENAI_API_KEY");
   const model = Deno.env.get("OPENAI_MODEL");
   if (!token || !model) {
     console.warn("OpenAI API key or model not set");
     return Promise.resolve("");
   }
-  return limit(() => fetch("https://api.openai.com/v1/chat/completions", {
+  return openaiRateLimit.schedule(() => fetch("https://api.openai.com/v1/chat/completions", {
     body: JSON.stringify({
       ...OpenAIConfig,
       "messages": [
@@ -160,29 +186,31 @@ export function GetOpenAIEstimate(planner: PlannerItem, assignment: CanvasAssign
   }).catch(err => { throw new Error(err) }));
 }
 
-export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL" ) {
+export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAssignment, estimate?: "" | "XS" | "S" | "M" | "L" | "XL") {
   const baseUrl = Deno.env.get("CANVAS_URL");
   const databaseID = Deno.env.get("NOTION_DATABASE_ID");
   if (!databaseID || !baseUrl) {
     throw new Error("How did we get here?");
   }
-  const markdown = turndown.turndown(assignment.description || assignment.message).slice(0, 3000);
-  return limit(() => notion.pages.create({
-    "parent": { 
+  const description = assignment.description || assignment.message || "";
+  const plannableDue = planner.plannable.due_at || planner.plannable.todo_date || assignment.due_at || "";
+  const markdown = turndown.turndown(description).slice(0, 3000);
+  return notionRateLimit.schedule(() => notion.pages.create({
+    "parent": {
       "type": "database_id",
-      "database_id": databaseID 
+      "database_id": databaseID
     },
     "properties": {
-      Name: {
+      "Name": {
         title: [
           {
             text: {
-              content: assignment.title
+              content: assignment.title || planner.plannable.title
             }
           }
         ]
       },
-      ID: {
+      "ID": {
         rich_text: [
           {
             text: {
@@ -191,17 +219,17 @@ export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAs
           }
         ]
       },
-      Due: {
+      "Due Date": {
         date: {
-          start: assignment.due_at
+          start: new Date(plannableDue).toDateString().split('T', 1)[0]
         }
       },
-      Status: {
-        select: {
-          name: assignment.locked_for_user ? "Locked" : "Not Started"
+      "Status": {
+        status: {
+          name: "Not Started"
         }
       },
-      class: {
+      "Class": {
         rich_text: [
           {
             text: {
@@ -210,46 +238,109 @@ export function addAssignmentToNotion(planner: PlannerItem, assignment: CanvasAs
           }
         ]
       },
-      link: {
+      "Link": {
         url: baseUrl + assignment.html_url
       },
-      estimate: {
+      "Estimate": {
         select: {
           name: estimate || "M"
         }
-      }
+      },
+      "Priority": {
+        select: {
+          name: "Should Do"
+        }
+      },
     },
     // @ts-expect-error The Notion API is not typed properly in this case
     "children": markdownToBlocks(markdown)
   }));
 }
 
-
-
 if (import.meta.main) {
-  const [canvasPlanner, notionDatabase] = await Promise.all([getCanvasPlanner(), getNotionDatabase()]);
+  const [canvasUserID, canvasPlanner, notionDatabase] = await Promise.all([getCanvasUserID(), getCanvasPlanner(), getNotionDatabase()]);
   const { both, onlyA: onlyCanvas } = mergeByKey(canvasPlanner, notionDatabase, "plannable_id", "property_id");
   // Add new assignments to Notion
   const assignments = onlyCanvas.filter(assignment => assignment.plannable_type !== "calendar_event");
-  assignments.forEach(async (planner) => {
-    const assignment = await getCanvasAssignmentDetails(planner);
-    // OpenAI Categorization (we only care about the assignments that are not locked)
-    const isLocked = assignment.locked_for_user;
-    if (isLocked) {
-      await addAssignmentToNotion(planner, assignment);
+  const newPromises = assignments.map(async (planner) => {
+    if (planner.html_url.includes("/submissions/")) {
+      planner.html_url = planner.html_url.replace(/\/submissions\/\d+$/, "");
     }
+    const assignment = await getCanvasAssignmentDetails(planner);
+    if (assignment.locked_for_user) return;
+    // OpenAI Categorization (we only care about the assignments that are not locked)
     const estimate = await GetOpenAIEstimate(planner, assignment);
     // Add to Notion
     await addAssignmentToNotion(planner, assignment, estimate);
   })
   // Update assignments already in Notion
-  // both.forEach(async (assignment) => {
-    // TODO: Update due date on all assignments
-    // Is assignment completed on Canvas?
-    // if (assignment.planner_override && assignment.planner_override.marked_complete || assignment.submissions.submitted) {
-      // Is assignment completed on Notion?
-    // TODO: Update Notion status on Canvas completed assignments
-    // TODO: Update Canvas status on Notion completed assignments
-  //   }
-  // });
+  const updatePromises = both.map(async ([planner, nassign]) => {
+    const plannableDue = planner.plannable.due_at || planner.plannable.todo_date || "";
+    const isDifferentDueDate = new Date(plannableDue).toDateString() !== new Date(nassign.property_due_date.start).toDateString();
+    const isCanvasDone = planner.submissions.submitted || (planner.planner_override && planner.planner_override.marked_complete) || false;
+    const isCanvasOverrideSet = planner.planner_override !== false;
+    const isNotionNotStarted = nassign.property_status.name === "Not Started";
+    const isNotionDone = nassign.property_status.name === "Completed";
+    // Update due date on assignments with different due dates
+    if (isDifferentDueDate) {
+      await notionRateLimit.schedule(() => notion.pages.update({
+        page_id: nassign.id,
+        properties: {
+          "Due Date": {
+            date: {
+              start: new Date(plannableDue).toISOString().split('T', 1)[0]
+            }
+          }
+        }
+      }));
+    }
+    // Update Notion status on Canvas completed assignments
+    if (isCanvasDone && isNotionNotStarted) {
+      await notionRateLimit.schedule(() => notion.pages.update({
+        page_id: nassign.id,
+        properties: {
+          "Status": {
+            status: {
+              name: "Completed"
+            }
+          }
+        }
+      }));
+    }
+    // Update Canvas status on Notion completed assignments
+    if (isNotionDone && !isCanvasDone && !isCanvasOverrideSet) {
+      await canvasRateLimit.schedule(() => fetch(`${Deno.env.get("CANVAS_URL")}/api/v1/planner/overrides`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          "id": null,
+          "plannable_id": planner.plannable_id,
+          "plannable_type": "assignment",
+          "user_id": canvasUserID.toString(),
+          "marked_complete": true
+        })
+      }));
+    }
+    if (isNotionDone && !isCanvasDone && isCanvasOverrideSet) {
+      const plannerOverride = planner.planner_override as PlannerOverride;
+      await canvasRateLimit.schedule(() => fetch(`${Deno.env.get("CANVAS_URL")}/api/v1/planner/overrides/${plannerOverride.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${Deno.env.get("CANVAS_API_KEY")}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          "id": plannerOverride.id,
+          "plannable_id": planner.plannable_id,
+          "plannable_type": "assignment",
+          "user_id": canvasUserID.toString(),
+          "marked_complete": true
+        })
+      }));
+    }
+  });
+  await Promise.all([...newPromises, ...updatePromises]);
 }

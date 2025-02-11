@@ -16,7 +16,8 @@ interface Plannable {
   created_at: string;
   updated_at: string;
   points_possible: number;
-  due_at: string;
+  due_at?: string;
+  todo_date?: string;
 }
 
 interface PlannerItem {
@@ -74,7 +75,14 @@ interface NotionAssignment {
     end: string | null;
     time_zone: string | null;
   };
-  property_status: "Locked" | "Not Started" | "Started" | "Completed";
+  property_due_date: {
+    start: string;
+    end: string | null;
+    time_zone: string | null;
+  };
+  property_status: {
+    name: "Locked" | "Not Started" | "Started" | "Completed"
+  };
 }
 
 type NotionRichText = {
