@@ -8,7 +8,9 @@ Template for use with the app: https://tsuniiverse.notion.site/1976e99d91128076b
 
 Roadmap
 - [x] Sync assignments and completion back and forth between one Canvas user and one Notion database when the program is run
-- [ ] Support multiple users & read their info from a database
+- [ ] Support mapping fields from the template to the user's database
+- [ ] Support multiple users
 - [ ] Support manual refresh via webhook
 - [ ] Automatically refresh on a schedule
 - [ ] Dockerfile
+- [ ] Web frontend for users to register
