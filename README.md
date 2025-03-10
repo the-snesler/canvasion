@@ -14,3 +14,4 @@ Roadmap
 - [x] Automatically refresh on a schedule
 - [ ] Dockerfile
 - [ ] Web frontend for users to register
+- [ ] Setup instructions
