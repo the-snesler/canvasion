@@ -3,7 +3,12 @@
 <img src="https://github.com/user-attachments/assets/d5af387b-9949-453b-81e1-fc473a9a4dd8" width=400>
 </p>
 
-Sync all your assignments to and fro between Canvas and a Notion database!
+Canvas assignments are invading your Notion database! Such horror and tragedy!
+
+This script will sync all your assignments to and fro between Canvas and a Notion database. It has a few unique features that make it stand out:
+- Assignment description syncing: Get more details about your work, directly in the Notion page.
+- Assignment completion syncing: Submitting an assignment on Canvas will change its status on Notion.
+- AI complexity estimation: Canvasion can estimate roughly how complicated a given assignment is, using an optional OpenAI key
 
 # Setup instructions
 
@@ -41,13 +46,3 @@ OPENAI_MODEL="gpt-4o-2024-08-06" # could also use 4o-mini
 To run the program, you can run `deno run --allow-env --allow-net --allow-read main.ts"`.
 
 This will sync your assignments between Notion and Canvas every 4 hours while the program is running.
-
-# Roadmap
-- [x] Sync assignments and completion back and forth between one Canvas user and one Notion database when the program is run
-- [ ] Support mapping fields from the template to the user's database
-- [ ] Support multiple users
-- [ ] Support manual refresh via webhook
-- [x] Automatically refresh on a schedule
-- [ ] Dockerfile
-- [ ] Web frontend for users to register
-- [x] Setup instructions
